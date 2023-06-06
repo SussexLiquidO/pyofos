@@ -16,14 +16,17 @@ class DataExtractor():
         valid_files = []
         valid_out_keys = []
         valid_mc_keys = []
+        valid_init_mc_keys = []
         for infile in input_files:
             if self.file_isvalid(infile):
                 valid_files.append(infile)
                 valid_out_keys.append(self.get_valid_out_key(infile))  # This is a temporary hack
                 valid_mc_keys.append(self.get_valid_mc_key(infile))
+                valid_init_mc_keys.append(self.get_valid_init_mc_key(infile))
 
         self.out_keys = valid_out_keys
         self.mc_keys = valid_mc_keys
+        self.init_mc_keys = valid_init_mc_keys
         self.input_files = valid_files
 
     # Need to define a better way to get the valid outkey if there are several output trees in file
@@ -40,6 +43,17 @@ class DataExtractor():
             all_out_num = np.array([int(out_key[-1]) for out_key in all_out_keys])
             index = np.argmax(all_out_num)
             return all_out_keys[index]
+
+    def get_valid_init_mc_key(self, infile):
+        with uproot.open(infile) as file:
+            try:
+                all_out_keys = [out_key for out_key in file.keys() if out_key.startswith('init_mc')]  # filter metas
+                all_out_num = np.array([int(out_key[-1]) for out_key in all_out_keys])
+                index = np.argmax(all_out_num)
+                return all_out_keys[index]
+            except:
+                print('no init_mc tree found')
+                return None
 
     def file_isvalid(self, infile):
         try:
@@ -72,9 +86,10 @@ class DataExtractor():
         return hit_obs
 
     def get_truth_data(self):
-        truthdata = uproot.concatenate([self.input_files[i] + ":" + self.mc_keys[i] for i in range(len(self.input_files))],
-                                       filter_name=["i_pos_x", "i_pos_y", "i_pos_z", "i_mom_x", "i_mom_y", "i_mom_z",
-                                                    "i_time", "i_E"], library='np')
+        truthdata = uproot.concatenate(
+            [self.input_files[i] + ":" + self.mc_keys[i] for i in range(len(self.input_files))],
+            filter_name=["i_pos_x", "i_pos_y", "i_pos_z", "i_mom_x", "i_mom_y", "i_mom_z",
+                         "i_time", "i_E"], library='np')
         momentum = np.stack([
             np.array([mom_x[0] for mom_x in truthdata['i_mom_x']]),
             np.array([mom_y[0] for mom_y in truthdata['i_mom_y']]),
@@ -102,10 +117,41 @@ class DataExtractor():
 
         return hyp
 
-    def get_all_images(self, side_number=None):
+    def get_init_truth_data(self, stop_num=None, start_num=0):
+        if stop_num < start_num:
+            raise ValueError('stop_num should be equal to or larger than start_num')
+
+        hypdata = uproot.concatenate(
+            [self.input_files[i] + ":" + self.init_mc_keys[i] for i in range(len(self.input_files))],
+            filter_name=["mcx", "mcy", "mcz", "mct", "mcu", "mcv", "mcw", "mcke", "mcpid"], library='np')
+
+        if stop_num > len(hypdata['mcx']):
+            raise ValueError('stop_num should be equal to or smaller than the total number of events: ',
+                             len(hypdata['mcx']))
+
+        mcaz = np.mod(np.arctan2(hypdata['mcv'], hypdata['mcu']), 2 * np.pi).astype(np.float32)[start_num:stop_num]
+        mcze = np.arccos(hypdata['mcw']).astype(np.float32)[start_num:stop_num]
+        hyp = np.stack([hypdata['mcx'].astype(np.float32)[start_num:stop_num],
+                        hypdata['mcy'].astype(np.float32)[start_num:stop_num],
+                        hypdata['mcz'].astype(np.float32)[start_num:stop_num],
+                        mcze,
+                        mcaz,
+                        hypdata['mct'].astype(np.float32)[start_num:stop_num],
+                        hypdata['mcke'].astype(np.float32)[start_num:stop_num],
+                        hypdata['mcpid'].astype(np.float32)[start_num:stop_num]
+                        ], axis=1)
+        return hyp
+
+    def get_all_images(self, side_number=None, stop_num=None, start_num=0):
+        if stop_num < start_num:
+            raise ValueError('stop_num should be equal to or larger than start_num')
+
         obsdata = uproot.concatenate(
             [self.input_files[i] + ":" + self.out_keys[i] for i in range(len(self.input_files))],
-            filter_name=['h_primary_id', "h_pos_y", "h_pos_z"], library='np')
+            filter_name=['h_primary_id'], library='np')
+        if stop_num > len(obsdata['h_primary_id']):
+            raise ValueError('stop_num should be equal to or smaller than the total number of events: ',
+                             len(obsdata['h_primary_id']))
 
         if side_number is None:
             print(
@@ -113,13 +159,79 @@ class DataExtractor():
             side_number = int(len(np.unique(np.concatenate(obsdata['h_primary_id']))) ** 0.5)
             print("Calculated number of fibers on a side is: " + str(side_number))
 
-        imgs = np.array([self.get_one_image(side_number, obs) for obs in obsdata['h_primary_id']])
+        imgs = []
+        if stop_num is None:
+            stop_num = len(obsdata['h_primary_id'])
+        for i in range(start_num, stop_num):
+            imgs.append(self.get_one_image(side_number, obsdata['h_primary_id'][i]))
+
+        imgs = np.array([self.get_one_image(side_number, obs) for obs in obsdata['h_primary_id']]).astype(np.uint16)
         return imgs
 
     def get_one_image(self, side_number, evtdata):
         img = np.zeros(side_number ** 2)
         index, number = np.unique(evtdata, return_counts=True)
         img[index] = number
-#        img = np.flip(img) #for some reason index starts at bottom right corner
+        #        img = np.flip(img) #for some reason index starts at bottom right corner
         img.shape = (side_number, side_number)
-        return img
+        return img.astype(np.uint16)
+
+    def get_hitman_train_data(self):
+        obsdata = uproot.concatenate(
+            [self.input_files[i] + ":" + self.out_keys[i] for i in range(len(self.input_files))],
+            filter_name=['h_primary_id', 'h_time'], library='np')
+
+        nhit = np.array([len(hits) for hits in obsdata['h_primary_id']], dtype=np.int32)
+        charge_obs = np.stack([
+            nhit.astype(np.float32)
+        ], axis=1)
+
+        hit_obs = np.stack([
+            np.concatenate(obsdata['h_primary_id']).astype(np.float32),
+            np.concatenate(obsdata['h_time']).astype(np.float32)
+        ]
+            , axis=1)
+
+        hit_obs[:, 1] = hit_obs[:, 1] + np.random.exponential(10, len(hit_obs[:, 1]))  # Add random time decay
+
+        del obsdata
+
+        charge_hyp = self.get_init_truth_data()
+        hit_hyp = np.repeat(charge_hyp, nhit, axis=0)
+
+        return charge_obs, hit_obs, charge_hyp, hit_hyp
+
+    def get_hitman_reco_data(self):
+        obsdata = uproot.concatenate(
+            [self.input_files[i] + ":" + self.out_keys[i] for i in range(len(self.input_files))],
+            filter_name=['h_primary_id', 'h_time'], library='np')
+
+        charge_hyp = self.get_init_truth_data()
+
+        nhit = np.array([len(hits) for hits in obsdata['h_primary_id']], dtype=np.int32)
+        charge_obs = np.stack([
+            nhit.astype(np.float32)
+        ], axis=1)
+
+        events = []
+
+        for i in range(len(nhit)):
+            hit_idx = obsdata['h_primary_id'][i].astype(np.float32)
+            hit_t = obsdata['h_time'][i].astype(np.float32)
+            hit_t = hit_t + np.random.exponential(10, len(hit_t))  # Add random time decay
+
+            hits = np.stack([
+                hit_idx,
+                hit_t.astype(np.float32)
+            ]
+                , axis=1)
+
+            event = {
+                "hits": hits,
+                "total_charge": charge_obs[i],
+                "truth": charge_hyp[i]
+            }
+
+        del obsdata
+
+        return events
