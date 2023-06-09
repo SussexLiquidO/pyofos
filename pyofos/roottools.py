@@ -170,11 +170,39 @@ class DataExtractor():
 
     def get_one_image(self, side_number, evtdata):
         img = np.zeros(side_number ** 2)
+        # index: unique fiber num, number: how many hits that fiber saw
         index, number = np.unique(evtdata, return_counts=True)
         img[index] = number
         #        img = np.flip(img) #for some reason index starts at bottom right corner
         img.shape = (side_number, side_number)
         return img.astype(np.uint16)
+
+    def get_chans_times(self, side_number=None, stop_num=None, start_num=0):
+        if stop_num < start_num:
+            raise ValueError('stop_num should be equal to or larger than start_num')
+
+        obsdata = uproot.concatenate(
+            [self.input_files[i] + ":" + self.out_keys[i] for i in range(len(self.input_files))],
+            filter_name=['h_primary_id','h_time'], library='np')
+        if stop_num > len(obsdata['h_primary_id']):
+            raise ValueError('stop_num should be equal to or smaller than the total number of events: ',
+                             len(obsdata['h_primary_id']))
+
+        if side_number is None:
+            print(
+                "Warning: Number of fibers on a size not specified for image data, will try calculating based on input data")
+            side_number = int(len(np.unique(np.concatenate(obsdata['h_primary_id']))) ** 0.5)
+            print("Calculated number of fibers on a side is: " + str(side_number))
+
+        chans = []
+        times = []
+        if stop_num is None:
+            stop_num = len(obsdata['h_primary_id'])
+        for i in range(start_num, stop_num):
+            chans.append(obsdata['h_primary_id'][i])
+            times.append(obsdata['h_time'][i])
+
+        return chans, times
 
     def get_hitman_train_data(self):
         obsdata = uproot.concatenate(
