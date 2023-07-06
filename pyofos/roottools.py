@@ -129,6 +129,9 @@ class DataExtractor():
             raise ValueError('stop_num should be equal to or smaller than the total number of events: ',
                              len(hypdata['mcx']))
 
+        if stop_num is None:
+            stop_num = len(hypdata['mcx'])
+
         mcaz = np.mod(np.arctan2(hypdata['mcv'], hypdata['mcu']), 2 * np.pi).astype(np.float32)[start_num:stop_num]
         mcze = np.arccos(hypdata['mcw']).astype(np.float32)[start_num:stop_num]
         hyp = np.stack([hypdata['mcx'].astype(np.float32)[start_num:stop_num],
