@@ -122,7 +122,7 @@ class DataExtractor():
             [self.input_files[i] + ":" + self.init_mc_keys[i] for i in range(len(self.input_files))],
             filter_name=["mcx", "mcy", "mcz", "mct", "mcu", "mcv", "mcw", "mcke", "mcpid"], library='np')
 
-        if stop_num is None:
+        if stop_num is None or stop_num == 0:
             stop_num = len(hypdata['mcx'])
 
         if stop_num < start_num:
@@ -186,7 +186,7 @@ class DataExtractor():
             [self.input_files[i] + ":" + self.out_keys[i] for i in range(len(self.input_files))],
             filter_name=['h_primary_id','h_time'], library='np')
 
-        if stop_num is None:
+        if stop_num is None or stop_num == 0:
             stop_num = len(obsdata['h_primary_id'])
 
         if stop_num < start_num:
